@@ -16,10 +16,8 @@ import com.bookmysport.authentication_service.Models.EmailModel;
 import com.bookmysport.authentication_service.Models.LoginModel;
 import com.bookmysport.authentication_service.Models.OTPModel;
 import com.bookmysport.authentication_service.Models.ResponseMessage;
-import com.bookmysport.authentication_service.Models.ServiceProviderModel;
 import com.bookmysport.authentication_service.Models.UserModel;
 import com.bookmysport.authentication_service.Repository.OtpRepo;
-import com.bookmysport.authentication_service.Repository.ServiceProviderRepository;
 import com.bookmysport.authentication_service.Repository.UserRepository;
 import com.bookmysport.authentication_service.StaticInfo.OTPGenerator;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -29,9 +27,6 @@ public class UserService {
 
     @Autowired
     private UserRepository userRepository;
-
-    @Autowired
-    private ServiceProviderRepository serviceProviderRepository;
 
     @Autowired
     private ResponseMessage responseMessage;
@@ -88,31 +83,6 @@ public class UserService {
         }
     }
 
-    public ResponseEntity<Object> generateOTPforTwoFAServiceProviderService(ServiceProviderModel serviceProviderModel) {
-        try {
-            int otpForTwoFA = OTPGenerator.generateRandom6DigitNumber();
-            OTPModel otp = new OTPModel();
-
-            otp.setEmail(serviceProviderModel.getEmail());
-            otp.setOtp(otpForTwoFA);
-            otp.setUseCase("login");
-            otp.setCreatedAt(LocalDateTime.now().truncatedTo(ChronoUnit.MINUTES));
-
-            emailModel.setRecipient(serviceProviderModel.getEmail());
-            emailModel.setSubject("OTP for Two-Factor Authentication");
-            emailModel.setMsgBody("Your OTP for Two-Factor Authentication is " + otpForTwoFA
-                    + ". It is valid only for 5 minutes.");
-
-            String response = emailService.sendSimpleMail(emailModel);
-            responseMessage.setSuccess(true);
-            responseMessage.setMessage(response);
-            otpRepo.save(otp);
-            return ResponseEntity.ok().body(responseMessage);
-        } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("Internal Server Error!");
-        }
-    }
-
     public ResponseEntity<Object> userRegisterService(Object userOrService, BindingResult bindingResult, String role) {
         try {
             if (!bindingResult.hasErrors()) {
@@ -126,9 +96,8 @@ public class UserService {
                     ObjectMapper objectMapper = new ObjectMapper();
                     UserModel userModel = objectMapper.convertValue(userOrService, UserModel.class);
                     UserModel userByEmail = userRepository.findByEmail(userModel.getEmail());
-                    ServiceProviderModel serviceproviderByEmail = serviceProviderRepository
-                            .findByEmail(userModel.getEmail());
-                    if (userByEmail == null & serviceproviderByEmail == null) {
+
+                    if (userByEmail == null) {
                         userModel.setPassword(hashPassword(userModel.getPassword()));
                         userRepository.save(userModel);
                         responseMessage.setSuccess(true);
@@ -143,41 +112,23 @@ public class UserService {
                     }
                 }
 
-                else if (role.equals("serviceprovider")) {
-                    ObjectMapper objectMapper = new ObjectMapper();
-                    ServiceProviderModel serviceProviderModel = objectMapper.convertValue(userOrService,
-                            ServiceProviderModel.class);
-                    ServiceProviderModel serviceProvierByEmail = serviceProviderRepository
-                            .findByEmail(serviceProviderModel.getEmail());
-
-                    if (serviceProvierByEmail == null) {
-                        serviceProviderModel.setPassword(hashPassword(serviceProviderModel.getPassword()));
-                        serviceProviderRepository.save(serviceProviderModel);
-                        responseMessage.setSuccess(true);
-                        responseMessage.setMessage("Account Created Successfully!");
-                        responseMessage.setToken(authService.generateToken(serviceProviderModel.getEmail()));
-                        return ResponseEntity.ok().body(responseMessage);
-                    } else {
-                        responseMessage.setSuccess(false);
-                        responseMessage.setMessage("User with this email already exists!");
-                        responseMessage.setToken(null);
-                        return ResponseEntity.badRequest().body(responseMessage);
-                    }
-                }
-
                 else {
                     responseMessage.setSuccess(false);
-                    responseMessage.setMessage("Invalid Input!");
+                    responseMessage.setMessage("User with this email already exists!");
                     responseMessage.setToken(null);
                     return ResponseEntity.badRequest().body(responseMessage);
                 }
+            }
 
-            } else {
+            else {
                 responseMessage.setSuccess(false);
-                responseMessage.setMessage("Invalid user name or email");
+                responseMessage.setMessage("Invalid Input!");
+                responseMessage.setToken(null);
                 return ResponseEntity.badRequest().body(responseMessage);
             }
-        } catch (Exception e) {
+        }
+
+        catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body("Internal Server Error!");
         }
@@ -206,29 +157,11 @@ public class UserService {
                     return ResponseEntity.badRequest().body(responseMessage);
                 }
             } else {
-                ServiceProviderModel serviceProviderModel = serviceProviderRepository
-                        .findByEmail(loginModel.getEmail());
-
-                if (serviceProviderModel != null) {
-                    if (BCrypt.checkpw(loginModel.getPassword(), serviceProviderModel.getPassword())) {
-                        responseMessage.setSuccess(true);
-                        responseMessage.setMessage("Logged in Successfully!");
-                        responseMessage.setToken(null);
-                        generateOTPforTwoFAServiceProviderService(serviceProviderModel);
-                        return ResponseEntity.ok().body(responseMessage);
-                    } else {
-                        responseMessage.setSuccess(false);
-                        responseMessage.setMessage("Invalid email or password");
-                        responseMessage.setToken(null);
-                        return ResponseEntity.badRequest().body(responseMessage);
-                    }
-                } else {
-                    responseMessage.setSuccess(false);
-                    responseMessage.setMessage("Invalid email or password");
-                    return ResponseEntity.badRequest().body(responseMessage);
-                }
+                responseMessage.setSuccess(false);
+                responseMessage.setMessage("Invalid email or password");
+                responseMessage.setToken(null);
+                return ResponseEntity.badRequest().body(responseMessage);
             }
-
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body("Internal Server Error!");
@@ -299,36 +232,11 @@ public class UserService {
                     responseMessage.setMessage("Invalid Email");
                     return ResponseEntity.badRequest().body(responseMessage);
                 }
-            } else if (role.equals("serviceprovider")) {
-                ServiceProviderModel spByEmail = serviceProviderRepository.findByEmail(email);
-                if (spByEmail != null) {
-                    int otp = OTPGenerator.generateRandom6DigitNumber();
-                    OTPModel otpForForgotPassword = new OTPModel();
-                    otpForForgotPassword.setEmail(email);
-                    otpForForgotPassword.setOtp(otp);
-                    otpForForgotPassword.setUseCase("forgotpassword");
-                    otpForForgotPassword.setCreatedAt(LocalDateTime.now().truncatedTo(ChronoUnit.MINUTES));
-
-                    emailModel.setRecipient(email);
-                    emailModel.setSubject("OTP for Resetting your password");
-                    emailModel.setMsgBody("Your OTP for resetting your password is " + Integer.toString(otp)
-                            + ". It is valid only for 5 minutes.");
-
-                    String response = emailService.sendSimpleMail(emailModel);
-                    responseMessage.setSuccess(true);
-                    responseMessage.setMessage(response);
-                    return ResponseEntity.ok().body(responseMessage);
-                } else {
-                    responseMessage.setSuccess(false);
-                    responseMessage.setMessage("Invalid Email");
-                    return ResponseEntity.badRequest().body(responseMessage);
-                }
             } else {
                 responseMessage.setSuccess(false);
-                responseMessage.setMessage("Invalid role");
+                responseMessage.setMessage("Invalid Email");
                 return ResponseEntity.badRequest().body(responseMessage);
             }
-
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("Internal Server Error!");
         }
@@ -353,7 +261,7 @@ public class UserService {
         }
     }
 
-    public ResponseEntity<Object> resetThePasswordService(String passwordFromUser, String role,String email) {
+    public ResponseEntity<Object> resetThePasswordService(String passwordFromUser, String role, String email) {
         try {
             if (role.equals("user")) {
                 UserModel user = userRepository.findByEmail(email);
@@ -364,13 +272,7 @@ public class UserService {
                 responseMessage.setMessage("Password Changed Successfully");
                 return ResponseEntity.ok().body(responseMessage);
             } else {
-                ServiceProviderModel serviceProviderModel = serviceProviderRepository
-                        .findByEmail(email);
-                serviceProviderModel.setPassword(hashPassword(passwordFromUser));
-                serviceProviderRepository.save(serviceProviderModel);
 
-                responseMessage.setSuccess(true);
-                responseMessage.setMessage("Password Changed Successfully");
                 return ResponseEntity.ok().body(responseMessage);
             }
 
@@ -391,16 +293,8 @@ public class UserService {
                     responseMessage.setMessage("Invalid email");
                     return ResponseEntity.badRequest().body(responseMessage);
                 }
-            } else {
-                ServiceProviderModel serviceProvider = serviceProviderRepository.findByEmail(email);
-                if (serviceProvider != null) {
-                    return ResponseEntity.ok(serviceProvider);
-                } else {
-                    responseMessage.setSuccess(false);
-                    responseMessage.setMessage("Invalid email");
-                    return ResponseEntity.badRequest().body(responseMessage);
-                }
             }
+            return ResponseEntity.badRequest().body(responseMessage);
 
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("Internal Server Error!");
